@@ -3,52 +3,65 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Scanner QR — Condomínio Digital</title>
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<title>Leitor QR e código de barras — Condomínio Digital</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#0f172a;color:#fff;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}.box{width:min(620px,100%);background:#fff;color:#0f172a;border-radius:18px;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.35)}h1{font-size:21px;margin:0 0 5px}.sub{color:#64748b;font-size:14px;margin-bottom:14px}.camera{position:relative;background:#000;border-radius:14px;overflow:hidden;min-height:300px}.camera video{display:block;width:100%;height:auto;min-height:300px;max-height:72vh;object-fit:cover;background:#000}.frame{position:absolute;left:12%;right:12%;top:18%;bottom:18%;border:3px solid #22c55e;border-radius:18px;box-shadow:0 0 18px rgba(34,197,94,.45);pointer-events:none}.line{position:absolute;left:14%;right:14%;top:50%;height:2px;background:#22c55e;box-shadow:0 0 12px #22c55e;pointer-events:none}.status{text-align:center;font-weight:700;margin:12px 0;color:#334155}.error{color:#b91c1c}.btn{width:100%;border:0;border-radius:10px;padding:13px;font-size:16px;font-weight:700;cursor:pointer;background:#e2e8f0;color:#0f172a}.ok{color:#15803d}.small{text-align:center;color:#64748b;font-size:12px;margin-top:9px}
 </style>
 </head>
 <body>
 <div class="box">
-  <h1>📷 Ler QR Code</h1>
-  <div class="sub">Aponte o código para a câmera. A leitura é automática.</div>
-  <div class="camera"><video id="video" autoplay muted playsinline></video><div class="frame"></div><div class="line"></div></div>
+  <h1>📷 Ler QR Code / Código de barras</h1>
+  <div class="sub">Aponte o QR Code ou o código de barras para a câmera. A leitura é automática.</div>
+  <div class="camera"><div id="reader"></div><div class="frame"></div><div class="line"></div></div>
   <div id="status" class="status">Iniciando scanner...</div>
   <button id="cancel" class="btn" type="button">Cancelar</button>
-  <div class="small">Ao detectar o QR Code, será emitido um bip e esta janela será fechada automaticamente.</div>
+  <div class="small">Aceita QR Code e vários formatos de código de barras, como EAN, UPC e Code 128. Ao detectar, emite um bip e fecha automaticamente.</div>
 </div>
 <script>
 (function(){
-  var video=document.getElementById('video'),status=document.getElementById('status'),stream=null,stopped=false,locked=false,timer=null,audio=null;
+  var status=document.getElementById('status'),stopped=false,locked=false,scanner=null,audio=null;
   function setStatus(t,err){status.textContent=t;status.className='status'+(err?' error':'');}
-  function stop(){stopped=true;if(timer)clearTimeout(timer);timer=null;if(stream){stream.getTracks().forEach(function(t){try{t.stop()}catch(_){}});stream=null}try{video.pause()}catch(_){}video.srcObject=null;}
-  function beep(){try{var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;audio=audio||new AC();if(audio.state==='suspended')audio.resume();var o=audio.createOscillator(),g=audio.createGain(),now=audio.currentTime;o.type='sine';o.frequency.setValueAtTime(880,now);o.frequency.setValueAtTime(1320,now+.07);g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.25,now+.01);g.gain.exponentialRampToValueAtTime(.0001,now+.18);o.connect(g);g.connect(audio.destination);o.start(now);o.stop(now+.2)}catch(_){}
-  }
-  function finish(value){if(locked)return;value=String(value||'').trim();if(!value)return;locked=true;beep();setStatus('QR Code detectado!');stop();try{if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'CONDOMINIO_DIGITAL_QR',value:value},'*')}}catch(_){}setTimeout(function(){try{window.close()}catch(_){}},230);}
+  function beep(){try{var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;audio=audio||new AC();if(audio.state==='suspended')audio.resume();var o=audio.createOscillator(),g=audio.createGain(),now=audio.currentTime;o.type='sine';o.frequency.setValueAtTime(880,now);o.frequency.setValueAtTime(1320,now+.07);g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.25,now+.01);g.gain.exponentialRampToValueAtTime(.0001,now+.18);o.connect(g);g.connect(audio.destination);o.start(now);o.stop(now+.2)}catch(_){} }
+  async function stop(){stopped=true;try{if(scanner)await scanner.stop()}catch(_){}try{if(scanner)scanner.clear()}catch(_){}scanner=null;}
+  function finish(value){if(locked)return;value=String(value||'').trim();if(!value)return;locked=true;beep();setStatus('Código detectado!');stop();try{if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'CONDOMINIO_DIGITAL_QR',value:value},'*')}}catch(_){}setTimeout(function(){try{window.close()}catch(_){}},230);}
   async function start(){
-    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){setStatus('Este navegador não disponibiliza a câmera para o scanner.',true);return;}
+    if(!window.Html5Qrcode){setStatus('Não foi possível carregar o leitor de códigos.',true);return;}
     try{
-      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
-      video.srcObject=stream;await video.play();
-      await new Promise(function(resolve){if(video.readyState>=2&&video.videoWidth)return resolve();video.addEventListener('loadedmetadata',resolve,{once:true});setTimeout(resolve,1500)});
-      if(!video.videoWidth){throw new Error('A câmera abriu, mas não enviou imagem.');}
-      setStatus('Scanner ativo — aponte para o QR Code.');
-      scan();
+      var formats=[
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.CODABAR,
+        Html5QrcodeSupportedFormats.DATA_MATRIX,
+        Html5QrcodeSupportedFormats.PDF_417,
+        Html5QrcodeSupportedFormats.AZTEC
+      ];
+      scanner=new Html5Qrcode('reader',{formatsToSupport:formats,verbose:false});
+      setStatus('Iniciando câmera...');
+      await scanner.start(
+        {facingMode:'environment'},
+        {fps:12,qrbox:function(w,h){var size=Math.max(180,Math.min(Math.min(w,h)*0.78,420));return {width:Math.round(size),height:Math.round(size*0.62)};},disableFlip:true},
+        function(decodedText){finish(decodedText);},
+        function(){ }
+      );
+      if(!stopped)setStatus('Leitor ativo — aproxime o QR Code ou código de barras.');
     }catch(e){
-      var n=e&&e.name||'';if(n==='NotAllowedError'||n==='SecurityError')setStatus('O acesso à câmera foi bloqueado para esta página. Autorize a câmera neste endereço e tente novamente.',true);else if(n==='NotFoundError')setStatus('Nenhuma câmera foi encontrada neste dispositivo.',true);else setStatus('Não foi possível iniciar a câmera: '+(e.message||e),true);
+      var n=e&&e.name||'';
+      if(n==='NotAllowedError'||n==='SecurityError')setStatus('O acesso à câmera foi bloqueado. Autorize a câmera neste endereço e tente novamente.',true);
+      else if(n==='NotFoundError')setStatus('Nenhuma câmera foi encontrada neste dispositivo.',true);
+      else setStatus('Não foi possível iniciar a câmera: '+(e&&e.message?e.message:e),true);
     }
   }
-  var canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});
-  function scan(){
-    if(stopped||locked||!video.videoWidth){return;}
-    try{
-      var w=Math.min(video.videoWidth,960),h=Math.max(1,Math.round(video.videoHeight*w/video.videoWidth));canvas.width=w;canvas.height=h;ctx.drawImage(video,0,0,w,h);var img=ctx.getImageData(0,0,w,h);var qr=window.jsQR?jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'}):null;if(!qr&&window.jsQR)qr=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});if(qr&&qr.data){finish(qr.data);return;}
-    }catch(_){}
-    timer=setTimeout(scan,55);
-  }
-  document.getElementById('cancel').addEventListener('click',function(){stop();try{window.close()}catch(_){}});
-  window.addEventListener('pagehide',stop);window.addEventListener('beforeunload',stop);start();
+  document.getElementById('cancel').addEventListener('click',function(){stop();try{window.close()}catch(_){} });
+  window.addEventListener('pagehide',stop);window.addEventListener('beforeunload',stop);
+  start();
 })();
 </script>
 </body>
